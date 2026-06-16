@@ -1,0 +1,23 @@
+{
+  "name": "@yourname/strudel-laser",
+  "version": "0.1.0",
+  "description": "Laser/WebSocket output + extra controls for Strudel",
+  "type": "module",
+  "main": "index.mjs",
+  "publishConfig": { "main": "dist/index.mjs" },
+  "scripts": {
+    "build": "vite build",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourname/strudel-laser.git"
+  },
+  "dependencies": {
+    "@strudel/core": "^1.0.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.11"
+  },
+  "engines": { "node": ">=18.0.0" }
+}
