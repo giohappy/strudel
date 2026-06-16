@@ -2,6 +2,12 @@ This document introduces you to Strudel in a technical sense.
 
 It is rather out of date, but there might still be useful info below.
 
+For deeper, code-anchored guides see:
+
+- [Extending Strudel](./extending-strudel.md) — `register()`, controls, custom outputs via `onTrigger`
+- [The Clock & Timing Model](./clock-and-timing.md) — the scheduler, lookahead, and `targetTime`
+- [Driving External Instruments](./driving-external-instruments.md) — MIDI vs OSC timing, and hosting VSTs via SuperDirt + VSTPlugin
+
 If you just want to *use* Strudel, have a look at the [Tutorial](https://strudel.tidalcycles.org/tutorial/).
 
 ## Strudel Packages

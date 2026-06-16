@@ -1321,6 +1321,78 @@ in that module run on import.
 > cannot use static `import` statements. For anything reusable, build a package
 > (Example B).
 
+#### A.2 Persisting your extensions: the REPL prebake script
+
+The "lives only until reload" limit has a built-in escape hatch: the
+[strudel.cc](https://strudel.cc) REPL lets you supply your own **prebake script** — a
+chunk of code that the host evaluates **once, in front of your pattern code**, every
+time the editor loads. It is the official place to put `register()` calls, custom
+controls, `samples()`/`aliasBank()` loads, and helper variables/chords you want
+available in *every* session without pasting them at the top of each tune.
+
+There are two layers, and they stack:
+
+1. **Built-in prebake** (`packages/repl/prebake.mjs:5`) — runs first. It `evalScope`s
+   the default modules (core, mini, tonal, webaudio, midi, …), registers the synth/ZZFX
+   sounds, loads the default sample banks, and defines a few extras like
+   `Pattern.prototype.piano` (`prebake.mjs:54`). This is why `s("bd")` and friends
+   just work.
+2. **Your prebake script** — runs after it. The website wires it in
+   `website/src/repl/useReplContext.jsx:90`:
+   ```js
+   prebake: async () => {
+     await Promise.all([modulesLoading, presets]); // wait for layer 1
+     if (prebakeScript) {
+       return evaluate(prebakeScript, { addReturn: false });
+     }
+   },
+   ```
+   `StrudelMirror` runs this once (`this.prebaked = prebake()`, `codemirror.mjs:198`)
+   and every evaluation `await`s it before touching your code
+   (`beforeEval → await this.prebaked`, `codemirror.mjs:227`). So your definitions are
+   guaranteed to exist by the time the first pattern is queried.
+
+The key detail is **`addReturn: false`**. Normally the transpiler wraps the last
+expression in an implicit `return` so the REPL gets a pattern to play; for the prebake
+it does *not*. The prebake script is evaluated purely for its **side effects** — it
+should *define* and *load* things (register methods, add controls, fetch samples, set
+`const` helpers), not try to "play" a pattern. The last line is not your tune.
+
+You manage it from the REPL settings panel, which can **import** a script from a
+`.strudel`/`.js` file and **export** the current one as `prebake_<date>.strudel`
+(`website/src/repl/components/panel/ImportPrebakeScriptButton.jsx:20,31`) — a
+`.strudel` file is just JavaScript. A companion setting,
+`includePrebakeScriptInShare`, prepends the prebake to shared links so they stay
+self-contained (`useReplContext.jsx:258`):
+```js
+if (includePrebakeScriptInShare) {
+  code = prebakeScript + '\n' + code;
+}
+```
+
+A well-known community example is switchangel's prebake, which loads extra sample
+packs and defines a library of helper functions/chords on top of the defaults:
+<https://github.com/switchangel/strudel-scripts/blob/main/prebake.strudel>. A minimal
+one of your own might look like:
+
+```js
+// my prebake.strudel — runs before every pattern, side-effects only
+samples('github:myname/mysamples');           // make a custom bank available
+register('crush2', (amount, pat) =>            // a personal shorthand method
+  pat.fmap((v) => ({ ...v, crush: 16 - 15 * amount })));
+globalThis.myChords = "<Cm7 Fm7 G7 Cm7>";      // a value you can reference in tunes
+```
+
+> **Watch the scope boundary.** The prebake is a *separate* `evaluate()` call from
+> your tune, and it runs with `blockBased: false` (the transpiler default,
+> `packages/transpiler/transpiler.mjs:38`). Only in block-based mode does the
+> transpiler auto-promote top-level `let`/`const`/`function` declarations onto
+> `strudelScope`/`globalThis` (`transpiler.mjs:146`, `createScopeAssignment` at
+> `:252`) — so a bare `const myChords = …` in the prebake is **not** visible to your
+> pattern code. To share state, use the things that mutate global state explicitly:
+> `register()` / `registerControl()` (which patch `Pattern.prototype` + `strudelScope`),
+> `samples()`/`aliasBank()`, or an explicit `globalThis.myChords = …` as above.
+
 ---
 
 ### Example B — A standalone, remotely-installable package
