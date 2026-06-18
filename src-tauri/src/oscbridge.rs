@@ -12,7 +12,6 @@ use tokio::sync::{mpsc, Mutex};
 use crate::loggerbridge::Logger;
 pub struct OscMsg {
     pub msg_buf: Vec<u8>,
-    pub timestamp: f64,
 }
 
 pub struct AsyncInputTransmit {
@@ -153,10 +152,7 @@ pub async fn sendosc(
 
         let msg_buf = encoder::encode(&OscPacket::Bundle(bundle)).unwrap();
 
-        let message_to_process = OscMsg {
-            msg_buf,
-            timestamp: m.timestamp,
-        };
+        let message_to_process = OscMsg { msg_buf };
         messages_to_process.push(message_to_process);
     }
 

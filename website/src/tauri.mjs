@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri as isTauriCore } from '@tauri-apps/api/core';
 
 export const Invoke = invoke;
-export const isTauri = () => window.__TAURI_IPC__ != null;
+export const isTauri = () => isTauriCore();

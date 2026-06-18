@@ -2,6 +2,7 @@ import { Bars3Icon, PlayIcon, StopIcon, XMarkIcon } from '@heroicons/react/16/so
 import cx from '@src/cx.mjs';
 import { StrudelIcon } from '@src/repl/components/icons/StrudelIcon';
 import { useSettings, setIsZen, setIsPanelOpened, setActiveFooter as setTab } from '../../../settings.mjs';
+import { isTauri } from '@tauri-apps/api/core';
 import '../../Repl.css';
 import { useLogger } from '../useLogger';
 import { ConsoleTab } from './ConsoleTab';
@@ -13,7 +14,7 @@ import { SettingsTab } from './SettingsTab';
 import { SoundsTab } from './SoundsTab';
 import { WelcomeTab } from './WelcomeTab';
 
-const TAURI = typeof window !== 'undefined' && window.__TAURI__;
+const TAURI = typeof window !== 'undefined' && isTauri();
 
 const { BASE_URL } = import.meta.env;
 const baseNoTrailing = BASE_URL.endsWith('/') ? BASE_URL.slice(0, -1) : BASE_URL;

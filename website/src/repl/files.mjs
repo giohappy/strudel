@@ -6,22 +6,50 @@ import {
   getAudioContext,
   loadBuffer,
 } from '@strudel/webaudio';
+import {
+  BaseDirectory,
+  readDir as readDirFlat,
+  readFile,
+  writeTextFile,
+  readTextFile,
+  exists,
+} from '@tauri-apps/plugin-fs';
 
-let TAURI;
-if (typeof window !== 'undefined') {
-  TAURI = window?.__TAURI__;
+export { BaseDirectory, writeTextFile, readTextFile, exists };
+
+export const dir = BaseDirectory.Audio; // https://v2.tauri.app/reference/javascript/fs/#basedirectory
+
+// Tauri v1 exposed a recursive `readDir` that returned a nested tree of
+// `{ name, children }` entries. Tauri v2's plugin-fs `readDir` is flat and
+// non-recursive, so we rebuild the recursive tree shape the rest of the app
+// (and FilesTab) expects.
+async function readDirTree(subpath) {
+  const entries = await readDirFlat(subpath, { baseDir: dir });
+  const children = [];
+  for (const entry of entries) {
+    const childPath = subpath ? `${subpath}/${entry.name}` : entry.name;
+    const node = { name: entry.name };
+    if (entry.isDirectory) {
+      node.children = await readDirTree(childPath);
+    }
+    children.push(node);
+  }
+  return children;
 }
-export const { BaseDirectory, readDir, readBinaryFile, writeTextFile, readTextFile, exists } = TAURI?.fs || {};
 
-export const dir = BaseDirectory?.Audio; // https://tauri.app/v1/api/js/path#audiodir
+// keep the previous call signature (`readDir(subpath, { dir, recursive: true })`)
+// so existing callers don't need to change.
+export async function readDir(subpath = '') {
+  return readDirTree(subpath);
+}
 const prefix = '~/music/';
 
 async function hasStrudelJson(subpath) {
-  return exists(subpath + '/strudel.json', { dir });
+  return exists(subpath + '/strudel.json', { baseDir: dir });
 }
 
 async function loadStrudelJson(subpath) {
-  const contents = await readTextFile(subpath + '/strudel.json', { dir });
+  const contents = await readTextFile(subpath + '/strudel.json', { baseDir: dir });
   const sampleMap = JSON.parse(contents);
   processSampleMap(sampleMap, (key, bank) => {
     registerSound(key, (t, hapValue, onended) => onTriggerSample(t, hapValue, onended, bank, fileResolver(subpath)), {
@@ -34,7 +62,7 @@ async function loadStrudelJson(subpath) {
 }
 
 async function writeStrudelJson(subpath) {
-  const children = await readDir(subpath, { dir, recursive: true });
+  const children = await readDir(subpath);
   const name = subpath.split('/').slice(-1)[0];
   const tree = { name, children };
 
@@ -49,7 +77,7 @@ async function writeStrudelJson(subpath) {
   });
   const json = JSON.stringify(samples, null, 2);
   const filepath = subpath + '/strudel.json';
-  await writeTextFile(filepath, json, { dir });
+  await writeTextFile(filepath, json, { baseDir: dir });
   console.log(`wrote strudel.json with ${count} samples to ${subpath}!`);
 }
 
@@ -90,7 +118,7 @@ export async function resolveFileURL(url) {
     return loadCache[url];
   }
   loadCache[url] = (async () => {
-    const contents = await readBinaryFile(url, { dir });
+    const contents = await readFile(url, { baseDir: dir });
     return uint8ArrayToDataURL(contents);
   })();
   return loadCache[url];

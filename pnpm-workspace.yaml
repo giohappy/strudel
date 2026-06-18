@@ -19,3 +19,11 @@ catalog:
   "@codemirror/view": "^6.36.2"
   "@codemirror/autocomplete": "^6.18.4"
   "@codemirror/search": "^6.5.8"
+
+allowBuilds:
+  '@serialport/bindings-cpp': true
+  esbuild: true
+  nx: true
+  sharp: true
+  tree-sitter: true
+  tree-sitter-haskell: true
