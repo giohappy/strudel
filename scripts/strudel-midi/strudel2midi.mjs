@@ -19,7 +19,7 @@ Or programmatically (works in the browser too - returns a Uint8Array):
 This module is isomorphic: the importable API (strudelToMidi / captureTracks) uses no
 Node-only APIs. The file system and CLI bits are loaded lazily and only run under Node.
 */
-import { evalScope, evaluate, Pattern, valueToMidi } from '@strudel/core';
+import { evalScope, evaluate, Pattern, valueToMidi, silence } from '@strudel/core';
 import { transpiler } from '@strudel/transpiler';
 import { extractEvents, buildMidiFile } from './smf.mjs';
 
@@ -39,6 +39,15 @@ async function ensureScope() {
   // stays "untimed" (no whole) and is skipped with a warning at extraction time.
   if (typeof globalThis.cc !== 'function' && typeof globalThis.ccv === 'function') {
     globalThis.cc = (ccn, ccv) => globalThis.ccv(ccv).ccn(ccn);
+  }
+
+  // Tempo/transport globals (setcps, hush, ...) normally live inside the live repl, not in
+  // evalScope. Stub them as no-ops returning silence so pasted REPL tunes don't crash here.
+  // Tempo is controlled via the cps/beatsPerCycle options instead; all()/each() are not applied.
+  for (const name of ['setcps', 'setCps', 'setcpm', 'setCpm', 'hush', 'all', 'each']) {
+    if (typeof globalThis[name] !== 'function') {
+      globalThis[name] = () => silence;
+    }
   }
 }
 

@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Strudel → MIDI (headless render)</title>
+
+    <!--
+      Single shared @strudel/* instance for the renderer.
+      esm.sh `?external=...` keeps the bare imports so the import map dedupes them
+      (otherwise each package would bundle its own @strudel/core and the .p() capture
+      + transpiler plugins would run against different module instances).
+    -->
+    <script type="importmap">
+      {
+        "imports": {
+          "@strudel/core": "https://esm.sh/@strudel/core@1.2.7",
+          "@strudel/mini": "https://esm.sh/@strudel/mini@1.2.7?external=@strudel/core",
+          "@strudel/tonal": "https://esm.sh/@strudel/tonal@1.2.7?external=@strudel/core,@strudel/mini",
+          "@strudel/transpiler": "https://esm.sh/@strudel/transpiler@1.2.7?external=@strudel/core,@strudel/mini"
+        }
+      }
+    </script>
+
+    <!-- The editor UI: Strudel's official embedded REPL web component (bundled, self-contained). -->
+    <script src="https://unpkg.com/@strudel/repl@1.2.7"></script>
+
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #1b1b1f;
+        color: #eee;
+        padding: 16px;
+      }
+      h1 {
+        font-size: 1.1rem;
+        margin: 0 0 4px;
+      }
+      p.sub {
+        margin: 0 0 16px;
+        color: #aaa;
+        font-size: 0.85rem;
+      }
+      strudel-editor {
+        display: block;
+      }
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 14px 0;
+        flex-wrap: wrap;
+      }
+      label {
+        font-size: 0.85rem;
+        color: #ccc;
+      }
+      input[type='number'] {
+        width: 70px;
+        padding: 6px;
+        background: #2a2a30;
+        color: #eee;
+        border: 1px solid #444;
+        border-radius: 6px;
+      }
+      button,
+      a.download {
+        padding: 8px 16px;
+        border-radius: 6px;
+        border: 0;
+        font: inherit;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      button {
+        background: #4f9cff;
+        color: #021;
+        font-weight: 600;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      a.download {
+        background: #36c281;
+        color: #021;
+        font-weight: 600;
+      }
+      a.download[hidden] {
+        display: none;
+      }
+      #status {
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        color: #bbb;
+        min-height: 1.2em;
+      }
+      #status.error {
+        color: #ff7a7a;
+      }
+      code {
+        background: #2a2a30;
+        padding: 1px 5px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>Strudel → MIDI</h1>
+    <p class="sub">
+      Edit a pattern below, set how many cycles to render, then <b>Run</b>. Label each voice
+      (<code>name:</code> or <code>$:</code>) — every label becomes its own MIDI track. Tempo is fixed at 120&nbsp;BPM
+      (cps 0.5, 4 beats/cycle).
+    </p>
+
+    <!-- Initial code lives in the comment body of the web component. -->
+    <strudel-editor>
+      <!--
+// label each voice -> one MIDI track per label
+drums: s("bd sd, hh*4")
+bass:  note("c2 <eb2 g2>").s("sawtooth")
+lead:  n("0 2 4 <7 6>").scale("c:minor")
+auto:  cc(74, sine.segment(16))
+-->
+    </strudel-editor>
+
+    <div class="controls">
+      <label>cycles <input id="cycles" type="number" min="1" max="256" step="1" value="8" /></label>
+      <button id="run">Run</button>
+      <a id="download" class="download" hidden download="strudel.mid">⬇ Download .mid</a>
+    </div>
+    <div id="status"></div>
+
+    <script type="module">
+      // The renderer is the same isomorphic module used by the Node CLI.
+      import { strudelToMidi } from '../../scripts/strudel-midi/strudel2midi.mjs';
+
+      const $ = (id) => document.getElementById(id);
+      const statusEl = $('status');
+      const runBtn = $('run');
+      const dlLink = $('download');
+      let lastUrl;
+
+      // General MIDI drum-ish map so s("bd sd hh ...") exports as notes on channel 10-style kits.
+      const soundMap = { bd: 36, sd: 38, hh: 42, oh: 46, rim: 37, cp: 39, lt: 45, mt: 47, ht: 50, cr: 49, rd: 51 };
+
+      const setStatus = (msg, isError = false) => {
+        statusEl.textContent = msg;
+        statusEl.classList.toggle('error', isError);
+      };
+
+      function getCode() {
+        const el = document.querySelector('strudel-editor');
+        // StrudelMirror keeps `.code` in sync with the editor on every edit.
+        const live = el?.editor?.code;
+        if (live && live.trim()) return live;
+        // Fallback to the initial comment body if the editor hasn't initialised yet.
+        return (el?.innerHTML || '').replace('<!--', '').replace('-->', '').trim();
+      }
+
+      runBtn.addEventListener('click', async () => {
+        runBtn.disabled = true;
+        dlLink.hidden = true;
+        setStatus('Rendering…');
+        try {
+          const cycles = Math.max(1, Number($('cycles').value) || 8);
+          const code = getCode();
+          if (!code) throw new Error('editor is empty');
+
+          const warnings = [];
+          const { tracks, bytes } = await strudelToMidi(code, {
+            cycles,
+            soundMap,
+            warn: (m) => warnings.push(m),
+          });
+
+          // Revoke the previous object URL so we don't leak it across runs.
+          if (lastUrl) URL.revokeObjectURL(lastUrl);
+          lastUrl = URL.createObjectURL(new Blob([bytes], { type: 'audio/midi' }));
+          dlLink.href = lastUrl;
+          dlLink.hidden = false;
+
+          const counts = Object.entries(tracks)
+            .map(([n, e]) => `${n}=${e.length}`)
+            .join(', ');
+          setStatus(
+            `Rendered ${cycles} cycle(s), ${bytes.length} bytes.\n` +
+              `tracks: ${counts || 'none (label voices with name: or $:)'}` +
+              (warnings.length ? `\n${warnings.length} warning(s):\n• ${warnings.slice(0, 6).join('\n• ')}` : ''),
+          );
+        } catch (err) {
+          console.error(err);
+          const hint = String(err).includes('Failed to fetch')
+            ? '\nHint: serve this page over http (e.g. `npx serve` from the repo root) — file:// cannot load modules.'
+            : '';
+          setStatus(`Error: ${err.message || err}${hint}`, true);
+        } finally {
+          runBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
