@@ -17,7 +17,7 @@ track's events by querying it over a time span, and writes a Standard MIDI File.
 node scripts/strudel-midi/strudel2midi.mjs song.js out.mid --cycles 8 --cps 0.5 --beatsPerCycle 4
 ```
 
-## Programmatic
+## Programmatic (works in Node and the browser)
 
 ```js
 import { strudelToMidi } from './strudel2midi.mjs';
@@ -35,8 +35,25 @@ const { tracks, warnings, bytes } = await strudelToMidi(code, {
   soundMap: { bd: 36, sd: 38, hh: 42 }, // map sample names -> MIDI notes
   skipUnmappedSounds: true,             // otherwise drum hits with no note are dropped (with a warning)
 });
-// `bytes` is a Uint8Array you can writeFileSync(...) to a .mid
+
+// `bytes` is a Uint8Array.
+// Node:    (await import('node:fs')).writeFileSync('out.mid', bytes)
+// Browser: const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/midi' }))
 ```
+
+## Environment support
+
+Both modules are isomorphic:
+
+- `smf.mjs` uses only `Math`, bitwise ops and `Uint8Array` — runs anywhere.
+- `strudel2midi.mjs`'s importable API (`strudelToMidi`, `captureTracks`) uses no Node-only
+  APIs. The file system (`node:fs`) is imported lazily and the CLI entrypoint is guarded by
+  `typeof process !== 'undefined'`, so importing the module in a browser never touches
+  `process` or `fs`. `@strudel/core` and `@strudel/transpiler` are browser-first.
+
+**Caveat (browser):** `captureTracks` temporarily overrides `Pattern.prototype.p` (and
+restores it) to harvest tracks during `evaluate()`. Use it for one-shot exports rather than
+concurrently with a live REPL evaluation, which also relies on `.p()`.
 
 ## How tracks are captured
 

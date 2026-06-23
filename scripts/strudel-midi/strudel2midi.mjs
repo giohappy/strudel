@@ -11,11 +11,14 @@ Pipeline:
 Usage:
   node scripts/strudel-midi/strudel2midi.mjs <input.(js|txt)> [output.mid] [--cycles 8] [--cps 0.5]
 
-Or programmatically:
+Or programmatically (works in the browser too - returns a Uint8Array):
   import { strudelToMidi } from './strudel2midi.mjs';
   const { tracks, bytes, warnings } = await strudelToMidi(code, { cycles: 8, soundMap: { bd: 36 } });
+  // browser: const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/midi' }));
+
+This module is isomorphic: the importable API (strudelToMidi / captureTracks) uses no
+Node-only APIs. The file system and CLI bits are loaded lazily and only run under Node.
 */
-import { readFileSync, writeFileSync } from 'node:fs';
 import { evalScope, evaluate, Pattern, valueToMidi } from '@strudel/core';
 import { transpiler } from '@strudel/transpiler';
 import { extractEvents, buildMidiFile } from './smf.mjs';
@@ -131,6 +134,8 @@ function parseArgs(argv) {
 }
 
 async function main() {
+  // Node-only deps are imported lazily so this module stays browser-safe.
+  const { readFileSync, writeFileSync } = await import('node:fs');
   const { positional, flags } = parseArgs(process.argv.slice(2));
   const input = positional[0];
   if (!input) {
@@ -154,8 +159,13 @@ async function main() {
   if (warnings.length) console.log(`${warnings.length} warning(s)`);
 }
 
-// run as CLI when invoked directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Run as a CLI only under Node when invoked directly. Guarded so importing this
+// module in a browser never touches `process`.
+const isNodeCli =
+  typeof process !== 'undefined' &&
+  process.argv?.[1] &&
+  import.meta.url === `file://${process.argv[1]}`;
+if (isNodeCli) {
   main().catch((err) => {
     console.error(err);
     process.exit(1);
