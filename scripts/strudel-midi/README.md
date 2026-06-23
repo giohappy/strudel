@@ -104,3 +104,18 @@ across tracks (e.g. `arp`) will instead act within each track.
 
 Other repl-only transport globals (`setcps`, `setcpm`, `hush`) are accepted as no-ops — set
 tempo via the `cps` / `beatsPerCycle` options instead.
+
+## Mute, solo and silence
+
+The repl's label conventions are honoured:
+
+- **Mute** — a label prefixed/suffixed with `_` (`_drums:` or `drums_:`) is silenced: it is not
+  captured and produces no MIDI track.
+- **Solo** — a label prefixed with a capital `S` (`Sdrums:`, or `S$:` for an anonymous track)
+  solos it: when any track is soloed, only soloed tracks are rendered and the `S` prefix is
+  stripped from the exported track name. (As in the repl, this means a track genuinely named
+  with a leading capital `S`, e.g. `Snare:`, is treated as a solo — avoid that unless intended.)
+- **Silence** — a track that is `silence`, all rests, or muted by a transform yields zero
+  events. It is kept in the returned `tracks` map (as `[]`) for transparency but **omitted from
+  the MIDI file** (no empty track is written), with a warning. If *every* track is silent, a
+  single empty track is written so the file stays a valid Standard MIDI File.

@@ -81,7 +81,13 @@ export async function captureTracks(code) {
   const prevEach = globalThis.each;
 
   Pattern.prototype.p = function (id) {
-    const key = String(id).includes('$') ? `$${anon++}` : String(id);
+    const sid = String(id);
+    // repl mute convention: `_name` / `name_` -> silenced, not captured/exported
+    if (sid.startsWith('_') || sid.endsWith('_')) {
+      return silence;
+    }
+    // anonymous `$:` tracks get a unique suffix, preserving any prefix (e.g. solo `S$`)
+    const key = sid.includes('$') ? `${sid}${anon++}` : sid;
     tracks[key] = this;
     return this;
   };
@@ -129,10 +135,25 @@ export async function strudelToMidi(code, options = {}) {
     warn('no tracks found - declare patterns with `$:` or `name:` so they are captured');
   }
 
+  // solo: if any label is soloed (capital-`S` prefix, e.g. `S$:` / `Sdrums:`) only those are
+  // rendered, matching the repl. (Muted labels `_name`/`name_` were already dropped at capture.)
+  const soloNames = names.filter((n) => n.length > 1 && n.startsWith('S'));
+  const activeNames = soloNames.length ? soloNames : names;
+  if (soloNames.length) {
+    warn(`solo active: rendering ${soloNames.length}, muting ${names.length - soloNames.length} other(s)`);
+  }
+
   const eventsByTrack = {};
   const midiTracks = [];
   const allWarnings = [];
-  for (const name of names) {
+  const pushWarn = (m) => {
+    allWarnings.push(m);
+    warn(m);
+  };
+  for (const name of activeNames) {
+    // strip the solo `S` prefix from the exported track name when solo is active
+    const label = soloNames.length && name.startsWith('S') ? name.slice(1) : name;
+
     // each() applies per labelled track; all() applies on top (repl order: each, then all).
     // Applied per-track to keep one MIDI track per voice - identical to the repl for transforms
     // that distribute over stack (fast/slow/rev/gain/lpf/ply/...). Transforms intended to act on
@@ -146,12 +167,23 @@ export async function strudelToMidi(code, options = {}) {
       beatsPerCycle,
       ppq,
       resolveNote,
-      warn: (m) => warn(`${name}: ${m}`),
+      warn: (m) => warn(`${label}: ${m}`),
       ...mapOptions,
     });
-    eventsByTrack[name] = events;
-    allWarnings.push(...warnings.map((w) => `${name}: ${w}`));
-    midiTracks.push({ name, events });
+    eventsByTrack[label] = events;
+    allWarnings.push(...warnings.map((w) => `${label}: ${w}`));
+    // silence management: a track that is `silence` / all rests / muted-by-transform yields no
+    // events - keep it in the returned map for transparency but don't write an empty MIDI track.
+    if (events.length) {
+      midiTracks.push({ name: label, events });
+    } else {
+      pushWarn(`${label}: silent (0 events) - omitted from file`);
+    }
+  }
+
+  // keep the Standard MIDI File valid even when everything is silent
+  if (!midiTracks.length) {
+    midiTracks.push({ name: 'empty', events: [] });
   }
 
   const bytes = buildMidiFile(midiTracks, { ppq, cps, beatsPerCycle });
