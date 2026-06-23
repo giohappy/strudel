@@ -43,7 +43,8 @@ async function ensureScope() {
 
   // Tempo/transport globals (setcps, hush, ...) normally live inside the live repl, not in
   // evalScope. Stub them as no-ops returning silence so pasted REPL tunes don't crash here.
-  // Tempo is controlled via the cps/beatsPerCycle options instead; all()/each() are not applied.
+  // Tempo is controlled via the cps/beatsPerCycle options instead. (all()/each() are captured
+  // per-eval in captureTracks() and actually applied to the tracks.)
   for (const name of ['setcps', 'setCps', 'setcpm', 'setCpm', 'hush', 'all', 'each']) {
     if (typeof globalThis[name] !== 'function') {
       globalThis[name] = () => silence;
@@ -61,29 +62,49 @@ const resolveNote = (value) => {
 };
 
 /**
- * Evaluate Strudel code and capture the patterns declared with `$:` / `label:`.
- * Returns an ordered map { name: Pattern }.
+ * Evaluate Strudel code and capture the patterns declared with `$:` / `label:`,
+ * plus any all()/each() transforms registered during evaluation.
+ * Returns { tracks: { name: Pattern }, allTransforms: fn[], eachTransform: fn|undefined }.
  */
 export async function captureTracks(code) {
   await ensureScope();
 
   const tracks = {};
   let anon = 0;
+  const allTransforms = [];
+  let eachTransform;
+
   // `.p()` is normally injected by the repl; headless we define our own capturing version.
   // The transpiler turns `name: pat` into `pat.p('name')` and `$: pat` into `pat.p('$')`.
-  const prev = Pattern.prototype.p;
+  const prevP = Pattern.prototype.p;
+  const prevAll = globalThis.all;
+  const prevEach = globalThis.each;
+
   Pattern.prototype.p = function (id) {
     const key = String(id).includes('$') ? `$${anon++}` : String(id);
     tracks[key] = this;
     return this;
   };
+  // Capture the repl combinators so strudelToMidi can apply them to the tracks.
+  // (Like the repl, all() accumulates and each() keeps the last assignment.)
+  globalThis.all = (transform) => {
+    allTransforms.push(transform);
+    return silence;
+  };
+  globalThis.each = (transform) => {
+    eachTransform = transform;
+    return silence;
+  };
+
   try {
     await evaluate(code, transpiler);
   } finally {
-    if (prev) Pattern.prototype.p = prev;
+    if (prevP) Pattern.prototype.p = prevP;
     else delete Pattern.prototype.p;
+    globalThis.all = prevAll;
+    globalThis.each = prevEach;
   }
-  return tracks;
+  return { tracks, allTransforms, eachTransform };
 }
 
 /**
@@ -102,7 +123,7 @@ export async function strudelToMidi(code, options = {}) {
     ...mapOptions
   } = options;
 
-  const patterns = await captureTracks(code);
+  const { tracks: patterns, allTransforms, eachTransform } = await captureTracks(code);
   const names = Object.keys(patterns);
   if (!names.length) {
     warn('no tracks found - declare patterns with `$:` or `name:` so they are captured');
@@ -112,7 +133,14 @@ export async function strudelToMidi(code, options = {}) {
   const midiTracks = [];
   const allWarnings = [];
   for (const name of names) {
-    const haps = patterns[name].queryArc(0, cycles);
+    // each() applies per labelled track; all() applies on top (repl order: each, then all).
+    // Applied per-track to keep one MIDI track per voice - identical to the repl for transforms
+    // that distribute over stack (fast/slow/rev/gain/lpf/ply/...). Transforms intended to act on
+    // the merged stack (e.g. arp on a combined chord) will instead act per track.
+    let pat = patterns[name];
+    if (eachTransform) pat = eachTransform(pat);
+    for (const transform of allTransforms) pat = transform(pat);
+    const haps = pat.queryArc(0, cycles);
     const { events, warnings } = extractEvents(haps, {
       cps,
       beatsPerCycle,

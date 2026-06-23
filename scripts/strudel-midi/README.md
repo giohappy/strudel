@@ -81,3 +81,26 @@ Each track becomes one MIDI track.
 
 Continuous controls without `ccn`/`ccv` (e.g. raw `lpf(sine)`) are not MIDI notes and are
 ignored; route them through `cc()` if you want CC automation.
+
+## `all()` / `each()`
+
+The repl combinators are supported:
+
+- `each(fn)` applies `fn` to **each** labelled track.
+- `all(fn)` applies `fn` on top of that (repl order: `each` first, then `all`); multiple
+  `all(...)` calls chain.
+
+```js
+drums: s("bd sd")
+bass:  note("c2 g2")
+all(fast("<1 2>"))   // both tracks follow the same speed pattern
+```
+
+Unlike the repl (which merges every track into one stack before applying `all`), the renderer
+applies these **per track** so each labelled voice stays its own MIDI track. The result is
+identical to the repl for transforms that distribute over `stack` — `fast`, `slow`, `rev`,
+`gain`, `lpf`, `ply`, etc. (the common case). A transform meant to act on the *merged* chord
+across tracks (e.g. `arp`) will instead act within each track.
+
+Other repl-only transport globals (`setcps`, `setcpm`, `hush`) are accepted as no-ops — set
+tempo via the `cps` / `beatsPerCycle` options instead.
